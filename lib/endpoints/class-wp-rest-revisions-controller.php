@@ -9,26 +9,30 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 	public function __construct( $parent_post_type ) {
 		$this->parent_post_type = $parent_post_type;
 		$this->parent_controller = new WP_REST_Posts_Controller( $parent_post_type );
-		$this->parent_base = $this->parent_controller->get_post_type_base( $this->parent_post_type );
+		$this->namespace = 'wp/v2';
+		$this->rest_base = 'revisions';
+		$post_type_object = get_post_type_object( $parent_post_type );
+		$this->parent_base = ! empty( $post_type_object->rest_base ) ? $post_type_object->rest_base : $post_type_object->name;
 	}
 
 	/**
 	 * Register routes for revisions based on post types supporting revisions
+	 *
+	 * @access public
 	 */
 	public function register_routes() {
 
-		register_rest_route( 'wp/v2', '/' . $this->parent_base . '/(?P<parent_id>[\d]+)/revisions', array(
+		register_rest_route( $this->namespace, '/' . $this->parent_base . '/(?P<parent>[\d]+)/' . $this->rest_base, array(
 			array(
 				'methods'         => WP_REST_Server::READABLE,
 				'callback'        => array( $this, 'get_items' ),
 				'permission_callback' => array( $this, 'get_items_permissions_check' ),
 				'args'            => $this->get_collection_params(),
 			),
-
 			'schema' => array( $this, 'get_public_item_schema' ),
 		) );
 
-		register_rest_route( 'wp/v2', '/' . $this->parent_base . '/(?P<parent_id>[\d]+)/revisions/(?P<id>[\d]+)', array(
+		register_rest_route( $this->namespace, '/' . $this->parent_base . '/(?P<parent>[\d]+)/' . $this->rest_base . '/(?P<id>[\d]+)', array(
 			array(
 				'methods'         => WP_REST_Server::READABLE,
 				'callback'        => array( $this, 'get_item' ),
@@ -42,44 +46,22 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 				'callback'        => array( $this, 'delete_item' ),
 				'permission_callback' => array( $this, 'delete_item_permissions_check' ),
 			),
-
 			'schema' => array( $this, 'get_public_item_schema' ),
 		));
 
 	}
 
 	/**
-	 * Get a collection of revisions
-	 *
-	 * @param WP_REST_Request $request Full data about the request.
-	 * @return WP_Error|WP_REST_Response
-	 */
-	public function get_items( $request ) {
-
-		$parent = get_post( $request['parent_id'] );
-		if ( ! $request['parent_id'] || ! $parent || $this->parent_post_type !== $parent->post_type ) {
-			return new WP_Error( 'rest_post_invalid_parent_id', __( 'Invalid post parent id.' ), array( 'status' => 404 ) );
-		}
-
-		$revisions = wp_get_post_revisions( $request['parent_id'] );
-
-		$response = array();
-		foreach ( $revisions as $revision ) {
-			$data = $this->prepare_item_for_response( $revision, $request );
-			$response[] = $this->prepare_response_for_collection( $data );
-		}
-		return $response;
-	}
-
-	/**
 	 * Check if a given request has access to get revisions
 	 *
+	 * @access public
+	 *
 	 * @param WP_REST_Request $request Full data about the request.
-	 * @return WP_Error|bool
+	 * @return WP_Error|boolean
 	 */
 	public function get_items_permissions_check( $request ) {
 
-		$parent = get_post( $request['parent_id'] );
+		$parent = $this->get_post( $request['parent'] );
 		if ( ! $parent ) {
 			return true;
 		}
@@ -92,42 +74,96 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 	}
 
 	/**
-	 * Get one revision from the collection
+	 * Get a collection of revisions
+	 *
+	 * @access public
 	 *
 	 * @param WP_REST_Request $request Full data about the request.
-	 * @return WP_Error|array
+	 * @return WP_Error|WP_REST_Response
 	 */
-	public function get_item( $request ) {
+	public function get_items( $request ) {
 
-		$parent = get_post( $request['parent_id'] );
-		if ( ! $request['parent_id'] || ! $parent || $this->parent_post_type !== $parent->post_type ) {
-			return new WP_Error( 'rest_post_invalid_parent_id', __( 'Invalid post parent id.' ), array( 'status' => 404 ) );
+		$parent = $this->get_post( $request['parent'] );
+		if ( ! $request['parent'] || ! $parent || $this->parent_post_type !== $parent->post_type ) {
+			return new WP_Error( 'rest_post_invalid_parent', __( 'Invalid post parent id.' ), array( 'status' => 404 ) );
 		}
 
-		$revision = get_post( $request['id'] );
-		if ( ! $revision || 'revision' !== $revision->post_type ) {
-			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid revision id.' ), array( 'status' => 404 ) );
-		}
+		$revisions = wp_get_post_revisions( $request['parent'] );
 
-		$response = $this->prepare_item_for_response( $revision, $request );
-		return $response;
+		$response = array();
+		foreach ( $revisions as $revision ) {
+			$data = $this->prepare_item_for_response( $revision, $request );
+			$response[] = $this->prepare_response_for_collection( $data );
+		}
+		return rest_ensure_response( $response );
 	}
 
 	/**
 	 * Check if a given request has access to get a specific revision
 	 *
+	 * @access public
+	 *
 	 * @param WP_REST_Request $request Full data about the request.
-	 * @return WP_Error|bool
+	 * @return WP_Error|boolean
 	 */
 	public function get_item_permissions_check( $request ) {
 		return $this->get_items_permissions_check( $request );
 	}
 
 	/**
+	 * Get one revision from the collection
+	 *
+	 * @access public
+	 *
+	 * @param WP_REST_Request $request Full data about the request.
+	 * @return WP_Error|array
+	 */
+	public function get_item( $request ) {
+
+		$parent = $this->get_post( $request['parent'] );
+		if ( ! $request['parent'] || ! $parent || $this->parent_post_type !== $parent->post_type ) {
+			return new WP_Error( 'rest_post_invalid_parent', __( 'Invalid post parent id.' ), array( 'status' => 404 ) );
+		}
+
+		$revision = $this->get_post( $request['id'] );
+		if ( ! $revision || 'revision' !== $revision->post_type ) {
+			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid revision id.' ), array( 'status' => 404 ) );
+		}
+
+		$response = $this->prepare_item_for_response( $revision, $request );
+		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Check if a given request has access to delete a revision
+	 *
+	 * @access public
+	 *
+	 * @param  WP_REST_Request $request Full details about the request.
+	 * @return WP_Error|boolean
+	 */
+	public function delete_item_permissions_check( $request ) {
+
+		$response = $this->get_items_permissions_check( $request );
+		if ( ! $response || is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		$post = $this->get_post( $request['id'] );
+		if ( ! $post ) {
+			return new WP_Error( 'rest_post_invalid_id', __( 'Invalid revision id.' ), array( 'status' => 404 ) );
+		}
+		$post_type = get_post_type_object( 'revision' );
+		return current_user_can( $post_type->cap->delete_post, $post->ID );
+	}
+
+	/**
 	 * Delete a single revision
 	 *
-	 * @param WP_REST_Request $request Full details about the request
-	 * @return bool|WP_Error
+	 * @access public
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 * @return WP_Error|boolean
 	 */
 	public function delete_item( $request ) {
 		$result = wp_delete_post( $request['id'], true );
@@ -150,69 +186,90 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 	}
 
 	/**
-	 * Check if a given request has access to delete a revision
-	 *
-	 * @param  WP_REST_Request $request Full details about the request.
-	 * @return bool|WP_Error
-	 */
-	public function delete_item_permissions_check( $request ) {
-
-		$response = $this->get_items_permissions_check( $request );
-		if ( ! $response || is_wp_error( $response ) ) {
-			return $response;
-		}
-
-		$post = get_post( $request['id'] );
-		$post_type = get_post_type_object( 'revision' );
-		return current_user_can( $post_type->cap->delete_post, $post->ID );
-	}
-
-	/**
 	 * Prepare the revision for the REST response
 	 *
-	 * @param WP_Post $post Post revision object.
+	 * @access public
+	 *
+	 * @param WP_Post         $post    Post revision object.
 	 * @param WP_REST_Request $request Request object.
-	 * @return array
+	 * @return WP_REST_Response $response
 	 */
 	public function prepare_item_for_response( $post, $request ) {
 
-		// Base fields for every post
-		$data = array(
-			'author'       => $post->post_author,
-			'date'         => $this->prepare_date_response( $post->post_date_gmt, $post->post_date ),
-			'date_gmt'     => $this->prepare_date_response( $post->post_date_gmt ),
-			'guid'         => $post->guid,
-			'id'           => $post->ID,
-			'modified'     => $this->prepare_date_response( $post->post_modified_gmt, $post->post_modified ),
-			'modified_gmt' => $this->prepare_date_response( $post->post_modified_gmt ),
-			'parent'       => (int) $post->post_parent,
-			'slug'         => $post->post_name,
-		);
-
 		$schema = $this->get_item_schema();
 
+		$data = array();
+
+		if ( ! empty( $schema['properties']['author'] ) ) {
+			$data['author'] = $post->post_author;
+		}
+
+		if ( ! empty( $schema['properties']['date'] ) ) {
+			$data['date'] = $this->prepare_date_response( $post->post_date_gmt, $post->post_date );
+		}
+
+		if ( ! empty( $schema['properties']['date_gmt'] ) ) {
+			$data['date_gmt'] = $this->prepare_date_response( $post->post_date_gmt );
+		}
+
+		if ( ! empty( $schema['properties']['id'] ) ) {
+			$data['id'] = $post->ID;
+		}
+
+		if ( ! empty( $schema['properties']['modified'] ) ) {
+			$data['modified'] = $this->prepare_date_response( $post->post_modified_gmt, $post->post_modified );
+		}
+
+		if ( ! empty( $schema['properties']['modified_gmt'] ) ) {
+			$data['modified_gmt'] = $this->prepare_date_response( $post->post_modified_gmt );
+		}
+
+		if ( ! empty( $schema['properties']['parent'] ) ) {
+			$data['parent'] = (int) $post->post_parent;
+		}
+
+		if ( ! empty( $schema['properties']['slug'] ) ) {
+			$data['slug'] = $post->post_name;
+		}
+
+		if ( ! empty( $schema['properties']['guid'] ) ) {
+			$data['guid'] = array(
+				/** This filter is documented in wp-includes/post-template.php */
+				'rendered' => apply_filters( 'get_the_guid', $post->guid ),
+				'raw'      => $post->guid,
+			);
+		}
+
 		if ( ! empty( $schema['properties']['title'] ) ) {
-			$data['title'] = $post->post_title;
+			$data['title'] = array(
+				'raw'      => $post->post_title,
+				'rendered' => get_the_title( $post->ID ),
+			);
 		}
 
 		if ( ! empty( $schema['properties']['content'] ) ) {
-			$data['content'] = $post->post_content;
+
+			$data['content'] = array(
+				'raw'      => $post->post_content,
+				/** This filter is documented in wp-includes/post-template.php */
+				'rendered' => apply_filters( 'the_content', $post->post_content ),
+			);
 		}
 
 		if ( ! empty( $schema['properties']['excerpt'] ) ) {
-			$data['excerpt'] = $post->post_excerpt;
+			$data['excerpt'] = array(
+				'raw'      => $post->post_excerpt,
+				'rendered' => $this->prepare_excerpt_response( $post->post_excerpt, $post ),
+			);
 		}
 
 		$context = ! empty( $request['context'] ) ? $request['context'] : 'view';
-		$data = $this->filter_response_by_context( $data, $context );
 		$data = $this->add_additional_fields_to_object( $data, $request );
+		$data = $this->filter_response_by_context( $data, $context );
 		$response = rest_ensure_response( $data );
-		if ( is_wp_error( $response ) ) {
-			return $response;
-		}
 
 		if ( ! empty( $data['parent'] ) ) {
-			$response->add_link( 'parent', rest_url( sprintf( 'wp/%s/%d', $this->parent_base, $data['parent'] ) ) );
+			$response->add_link( 'parent', rest_url( sprintf( '%s/%s/%d', $this->namespace, $this->parent_base, $data['parent'] ) ) );
 		}
 
 		/**
@@ -231,8 +288,10 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 	 * Check the post_date_gmt or modified_gmt and prepare any post or
 	 * modified date for single post output.
 	 *
-	 * @param string       $date_gmt
-	 * @param string|null  $date
+	 * @access protected
+	 *
+	 * @param string      $date_gmt GMT publication time.
+	 * @param string|null $date     Optional, default is null. Local publication time.
 	 * @return string|null ISO8601/RFC3339 formatted datetime.
 	 */
 	protected function prepare_date_response( $date_gmt, $date = null ) {
@@ -250,103 +309,84 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 	/**
 	 * Get the revision's schema, conforming to JSON Schema
 	 *
+	 * @access public
+	 *
 	 * @return array
 	 */
 	public function get_item_schema() {
 		$schema = array(
 			'$schema'    => 'http://json-schema.org/draft-04/schema#',
-			'title'      => "{$this->parent_base}-revision",
+			'title'      => "{$this->parent_post_type}-revision",
 			'type'       => 'object',
 			/*
 			 * Base properties for every Revision
 			 */
 			'properties' => array(
 				'author'          => array(
-						'description' => 'The id for the author of the object.',
-						'type'        => 'integer',
-						'context'     => array( 'view' ),
-					),
+					'description' => __( 'The id for the author of the object.' ),
+					'type'        => 'integer',
+					'context'     => array( 'view', 'edit', 'embed' ),
+				),
 				'date'            => array(
-					'description' => 'The date the object was published.',
+					'description' => __( 'The date the object was published.' ),
 					'type'        => 'string',
 					'format'      => 'date-time',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit', 'embed' ),
 				),
 				'date_gmt'        => array(
-					'description' => 'The date the object was published, as GMT.',
+					'description' => __( 'The date the object was published, as GMT.' ),
 					'type'        => 'string',
 					'format'      => 'date-time',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit' ),
 				),
 				'guid'            => array(
-					'description' => 'GUID for the object, as it exists in the database.',
+					'description' => __( 'GUID for the object, as it exists in the database.' ),
 					'type'        => 'string',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit' ),
 				),
 				'id'              => array(
-					'description' => 'Unique identifier for the object.',
+					'description' => __( 'Unique identifier for the object.' ),
 					'type'        => 'integer',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit', 'embed' ),
 				),
 				'modified'        => array(
-					'description' => 'The date the object was last modified.',
+					'description' => __( 'The date the object was last modified.' ),
 					'type'        => 'string',
 					'format'      => 'date-time',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit' ),
 				),
 				'modified_gmt'    => array(
-					'description' => 'The date the object was last modified, as GMT.',
+					'description' => __( 'The date the object was last modified, as GMT.' ),
 					'type'        => 'string',
 					'format'      => 'date-time',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit' ),
 				),
 				'parent'          => array(
-					'description' => 'The id for the parent of the object.',
+					'description' => __( 'The id for the parent of the object.' ),
 					'type'        => 'integer',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit', 'embed' ),
 					),
 				'slug'            => array(
-					'description' => 'An alphanumeric identifier for the object unique to its type.',
+					'description' => __( 'An alphanumeric identifier for the object unique to its type.' ),
 					'type'        => 'string',
-					'context'     => array( 'view' ),
+					'context'     => array( 'view', 'edit', 'embed' ),
 				),
 			),
 		);
 
 		$parent_schema = $this->parent_controller->get_item_schema();
 
-		foreach ( array( 'title', 'content', 'excerpt' ) as $property ) {
-			if ( empty( $parent_schema['properties'][ $property ] ) ) {
-				continue;
-			}
-
-			switch ( $property ) {
-
-				case 'title':
-					$schema['properties']['title'] = array(
-						'description' => 'Title for the object, as it exists in the database.',
-						'type'        => 'string',
-						'context'     => array( 'view' ),
-					);
-					break;
-
-				case 'content':
-					$schema['properties']['content'] = array(
-						'description' => 'Content for the object, as it exists in the database.',
-						'type'        => 'string',
-						'context'     => array( 'view' ),
-					);
-					break;
-
-				case 'excerpt':
-					$schema['properties']['excerpt'] = array(
-						'description' => 'Excerpt for the object, as it exists in the database.',
-						'type'        => 'string',
-						'context'     => array( 'view' ),
-					);
-					break;
-
-			}
+		if ( ! empty( $parent_schema['properties']['title'] ) ) {
+			$schema['properties']['title'] = $parent_schema['properties']['title'];
+		}
+		if ( ! empty( $parent_schema['properties']['content'] ) ) {
+			$schema['properties']['content'] = $parent_schema['properties']['content'];
+		}
+		if ( ! empty( $parent_schema['properties']['excerpt'] ) ) {
+			$schema['properties']['excerpt'] = $parent_schema['properties']['excerpt'];
+		}
+		if ( ! empty( $parent_schema['properties']['guid'] ) ) {
+			$schema['properties']['guid'] = $parent_schema['properties']['guid'];
 		}
 
 		return $this->add_additional_fields_schema( $schema );
@@ -354,6 +394,8 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 
 	/**
 	 * Get the query params for collections
+	 *
+	 * @access public
 	 *
 	 * @return array
 	 */
@@ -363,4 +405,24 @@ class WP_REST_Revisions_Controller extends WP_REST_Controller {
 		);
 	}
 
+	/**
+	 * Check the post excerpt and prepare it for single post output.
+	 *
+	 * @access protected
+	 *
+	 * @param string  $excerpt The post excerpt.
+	 * @param WP_Post $post    Post revision object.
+	 * @return string|null $excerpt
+	 */
+	protected function prepare_excerpt_response( $excerpt, $post ) {
+
+		/** This filter is documented in wp-includes/post-template.php */
+		$excerpt = apply_filters( 'the_excerpt', $excerpt, $post );
+
+		if ( empty( $excerpt ) ) {
+			return '';
+		}
+
+		return $excerpt;
+	}
 }

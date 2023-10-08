@@ -19,13 +19,13 @@
  */
 if ( false !== getenv( 'WP_DEVELOP_DIR' ) ) {
 	$test_root = getenv( 'WP_DEVELOP_DIR' ) . '/tests/phpunit';
-} else if ( false !== getenv( 'WP_TESTS_DIR' ) ) {
+} elseif ( false !== getenv( 'WP_TESTS_DIR' ) ) {
 	$test_root = getenv( 'WP_TESTS_DIR' );
-} else if ( false !== getenv( 'WP_ROOT_DIR' ) ) {
+} elseif ( false !== getenv( 'WP_ROOT_DIR' ) ) {
 	$test_root = getenv( 'WP_ROOT_DIR' ) . '/tests/phpunit';
-} else if ( file_exists( '../../../../tests/phpunit/includes/bootstrap.php' ) ) {
+} elseif ( file_exists( '../../../../tests/phpunit/includes/bootstrap.php' ) ) {
 	$test_root = '../../../../tests/phpunit';
-} else if ( file_exists( '/tmp/wordpress-tests-lib/includes/bootstrap.php' ) ) {
+} elseif ( file_exists( '/tmp/wordpress-tests-lib/includes/bootstrap.php' ) ) {
 	$test_root = '/tmp/wordpress-tests-lib';
 }
 
@@ -39,10 +39,29 @@ tests_add_filter( 'muplugins_loaded', '_manually_load_plugin' );
 require $test_root . '/includes/bootstrap.php';
 
 define( 'REST_TESTS_IMPOSSIBLY_HIGH_NUMBER', 99999999 );
+define( 'REST_REQUEST', true );
 
 // Helper classes
 if ( ! class_exists( 'WP_Test_REST_TestCase' ) ) {
 	require_once dirname( __FILE__ ) . '/class-wp-test-rest-testcase.php';
+}
+function test_rest_expand_compact_links( $links ) {
+	if ( empty( $links['curies'] ) ) {
+		return $links;
+	}
+	foreach ( $links as $rel => $links_array ) {
+		if ( ! strpos( $rel, ':' ) ) {
+			continue;
+		}
+
+		$name = explode( ':', $rel );
+
+		$curie = wp_list_filter( $links['curies'], array( 'name' => $name[0] ) );
+		$full_uri = str_replace( '{rel}', $name[1], $curie[0]['href'] );
+		$links[ $full_uri ] = $links_array;
+		unset( $links[ $rel ] );
+	}
+	return $links;
 }
 
 require_once dirname( __FILE__ ) . '/class-wp-test-rest-controller-testcase.php';

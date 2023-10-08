@@ -20,7 +20,7 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 		) );
 
 		$this->has_setup_template = false;
-
+		add_filter( 'theme_page_templates', array( $this, 'filter_theme_page_templates' ) );
 	}
 
 	public function test_register_routes() {
@@ -43,8 +43,171 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 		$this->assertEquals( array( 'view', 'embed', 'edit' ), $data['endpoints'][0]['args']['context']['enum'] );
 	}
 
+	public function test_registered_query_params() {
+		$request = new WP_REST_Request( 'OPTIONS', '/wp/v2/pages' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$keys = array_keys( $data['endpoints'][0]['args'] );
+		sort( $keys );
+		$this->assertEquals( array(
+			'after',
+			'author',
+			'author_exclude',
+			'before',
+			'context',
+			'exclude',
+			'filter',
+			'include',
+			'menu_order',
+			'offset',
+			'order',
+			'orderby',
+			'page',
+			'parent',
+			'parent_exclude',
+			'per_page',
+			'search',
+			'slug',
+			'status',
+			), $keys );
+	}
+
 	public function test_get_items() {
 
+	}
+
+	public function test_get_items_parent_query() {
+		$id1 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page' ) );
+		$id2 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'post_parent' => $id1 ) );
+		// No parent
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( 2, count( $data ) );
+		// Filter to parent
+		$request->set_param( 'parent', $id1 );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( 1, count( $data ) );
+		$this->assertEquals( $id2, $data[0]['id'] );
+	}
+
+	public function test_get_items_parents_query() {
+		$id1 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page' ) );
+		$id2 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'post_parent' => $id1 ) );
+		$id3 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page' ) );
+		$id4 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'post_parent' => $id3 ) );
+		// No parent
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( 4, count( $data ) );
+		// Filter to parents
+		$request->set_param( 'parent', array( $id1, $id3 ) );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( 2, count( $data ) );
+		$this->assertEqualSets( array( $id2, $id4 ), wp_list_pluck( $data, 'id' ) );
+	}
+
+	public function test_get_items_parent_exclude_query() {
+		$id1 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page' ) );
+		$this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'post_parent' => $id1 ) );
+		// No parent
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( 2, count( $data ) );
+		// Filter to parent
+		$request->set_param( 'parent_exclude', $id1 );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( 1, count( $data ) );
+		$this->assertEquals( $id1, $data[0]['id'] );
+	}
+
+	public function test_get_items_menu_order_query() {
+		$id1 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page' ) );
+		$id2 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'menu_order' => 2 ) );
+		$id3 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'menu_order' => 3 ) );
+		$id4 = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page', 'menu_order' => 1 ) );
+		// No parent
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEqualSets( array( $id1, $id2, $id3, $id4 ), wp_list_pluck( $data, 'id' ) );
+		// Filter to menu_order
+		$request->set_param( 'menu_order', 1 );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEqualSets( array( $id4 ), wp_list_pluck( $data, 'id' ) );
+		// Order by menu order
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$request->set_param( 'order', 'asc' );
+		$request->set_param( 'orderby', 'menu_order' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertEquals( $id1, $data[0]['id'] );
+		$this->assertEquals( $id4, $data[1]['id'] );
+		$this->assertEquals( $id2, $data[2]['id'] );
+		$this->assertEquals( $id3, $data[3]['id'] );
+	}
+
+	public function test_get_items_min_max_pages_query() {
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$request->set_param( 'per_page', 0 );
+		$response = $this->server->dispatch( $request );
+		$this->assertErrorResponse( 'rest_invalid_param', $response, 400 );
+		$data = $response->get_data();
+		// Safe format for 4.4 and 4.5 https://core.trac.wordpress.org/ticket/35028
+		$first_error = array_shift( $data['data']['params'] );
+		$this->assertContains( 'per_page must be between 1 (inclusive) and 100 (inclusive)', $first_error );
+		$request->set_param( 'per_page', 101 );
+		$response = $this->server->dispatch( $request );
+		$this->assertErrorResponse( 'rest_invalid_param', $response, 400 );
+		$data = $response->get_data();
+		$first_error = array_shift( $data['data']['params'] );
+		$this->assertContains( 'per_page must be between 1 (inclusive) and 100 (inclusive)', $first_error );
+	}
+
+	public function test_get_items_private_filter_query_var() {
+		// Private query vars inaccessible to unauthorized users
+		wp_set_current_user( 0 );
+		$page_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'page' ) );
+		$draft_id = $this->factory->post->create( array( 'post_status' => 'draft', 'post_type' => 'page' ) );
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$request->set_param( 'filter', array( 'post_status' => 'draft' ) );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertCount( 1, $data );
+		$this->assertEquals( $page_id, $data[0]['id'] );
+		// But they are accessible to authorized users
+		wp_set_current_user( $this->editor_id );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertCount( 1, $data );
+		$this->assertEquals( $draft_id, $data[0]['id'] );
+	}
+
+	public function test_get_items_invalid_date() {
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$request->set_param( 'after', rand_str() );
+		$request->set_param( 'before', rand_str() );
+		$response = $this->server->dispatch( $request );
+		$this->assertErrorResponse( 'rest_invalid_param', $response, 400 );
+	}
+
+	public function test_get_items_valid_date() {
+		$post1 = $this->factory->post->create( array( 'post_date' => '2016-01-15T00:00:00Z', 'post_type' => 'page' ) );
+		$post2 = $this->factory->post->create( array( 'post_date' => '2016-01-16T00:00:00Z', 'post_type' => 'page' ) );
+		$post3 = $this->factory->post->create( array( 'post_date' => '2016-01-17T00:00:00Z', 'post_type' => 'page' ) );
+		$request = new WP_REST_Request( 'GET', '/wp/v2/pages' );
+		$request->set_param( 'after', '2016-01-15T00:00:00Z' );
+		$request->set_param( 'before', '2016-01-17T00:00:00Z' );
+		$response = $this->server->dispatch( $request );
+		$data = $response->get_data();
+		$this->assertCount( 1, $data );
+		$this->assertEquals( $post2, $data[0]['id'] );
 	}
 
 	public function test_get_item() {
@@ -64,7 +227,6 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 
 	public function test_create_item_with_template() {
 		wp_set_current_user( $this->editor_id );
-		$this->setup_test_template();
 
 		$request = new WP_REST_Request( 'POST', '/wp/v2/pages' );
 		$params = $this->set_post_data( array(
@@ -92,8 +254,6 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 		$request->set_body_params( $params );
 		$response = $this->server->dispatch( $request );
 
-		$this->assertNotInstanceOf( 'WP_Error', $response );
-		$response = rest_ensure_response( $response );
 		$this->assertEquals( 201, $response->get_status() );
 
 		$links = $response->get_links();
@@ -142,8 +302,6 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 		) );
 		$response = $this->server->dispatch( $request );
 
-		$this->assertNotInstanceOf( 'WP_Error', $response );
-		$response = rest_ensure_response( $response );
 		$this->assertEquals( 200, $response->get_status() );
 
 		$headers = $response->get_headers();
@@ -209,14 +367,14 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 		$this->assertArrayHasKey( 'date_gmt', $properties );
 		$this->assertArrayHasKey( 'guid', $properties );
 		$this->assertArrayHasKey( 'excerpt', $properties );
-		$this->assertArrayHasKey( 'featured_image', $properties );
+		$this->assertArrayHasKey( 'featured_media', $properties );
 		$this->assertArrayHasKey( 'id', $properties );
 		$this->assertArrayHasKey( 'link', $properties );
 		$this->assertArrayHasKey( 'menu_order', $properties );
+		$this->assertArrayHasKey( 'meta', $properties );
 		$this->assertArrayHasKey( 'modified', $properties );
 		$this->assertArrayHasKey( 'modified_gmt', $properties );
 		$this->assertArrayHasKey( 'parent', $properties );
-		$this->assertArrayHasKey( 'password', $properties );
 		$this->assertArrayHasKey( 'ping_status', $properties );
 		$this->assertArrayHasKey( 'slug', $properties );
 		$this->assertArrayHasKey( 'status', $properties );
@@ -227,26 +385,14 @@ class WP_Test_REST_Pages_Controller extends WP_Test_REST_Post_Type_Controller_Te
 
 	public function tearDown() {
 		parent::tearDown();
-
-		if ( $this->has_setup_template ) {
-			unlink( $this->has_setup_template );
-		}
-
+		remove_filter( 'theme_page_templates', array( $this, 'filter_theme_page_templates' ) );
 	}
 
-	protected function setup_test_template() {
-
-		$contents = <<<EOT
-<?php
-/*
- * Template Name: My Test Template
- */
-
-EOT;
-
-		$this->has_setup_template = get_stylesheet_directory() . '/page-my-test-template.php';
-		file_put_contents( $this->has_setup_template, $contents );
-		wp_get_theme()->cache_delete();
+	public function filter_theme_page_templates( $page_templates ) {
+		return array(
+			'page-my-test-template.php' => 'My Test Template',
+		);
+		return $page_templates;
 	}
 
 	protected function set_post_data( $args = array() ) {
